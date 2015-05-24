@@ -1,0 +1,74 @@
+---
+title: "Predicting Exercise Style from Motion Data"
+author: "Rick Aster"
+date: "May 23, 2015"
+output: html_document
+---
+
+This project attempts to predict the style in which a weight lifting exercise was done from motion data. The Human Activity Recognition project (<http://groupware.les.inf.puc-rio.br/har>) collected a wide range of motion variables from sensors attached to six participants who lifted weights. Guided by a coach, each participant did the same exercise in five different ways, one of which (class A) was considered correct form, along with four others (B, C, D, and E) that simulated common mistakes in doing the same exercise. Here, I fit a gradient boosted model to a subset of this data. The model predicts with good accuracy which variation or style of the exercise was done from the motion data. 
+
+## Data
+
+The data presented with a total of 160 variables. One of these was the outcome variable and seven were identifying variables for the specific context of the data collection. The latter were excluded from analysis, as they would not be relevant to any newly collected data.
+
+Many of the variables were summary variables computed over a short period of time, or "window." These might not be useful in analyzing real-time data, for example in a device that might provide feedback to a person exercising, so I excluded them. Other variables had frequent missing values for various reasons. Missing values can interfere with model fitting, so for expedience I excluded these variables also. This left 52 variables that could be used for prediction.
+
+```{r warning=FALSE, cache=TRUE}
+common.types <- c("character", "factor", "integer", "integer", 
+           "factor", "factor", "integer", rep("character", 152))
+training.types <- c(common.types, "factor")
+testing.types <- c(common.types, "integer")
+training.fields <- read.csv("pml-training.csv",
+                            colClasses=training.types)
+testing.fields <- read.csv("pml-testing.csv", 
+                           colClasses=testing.types)
+
+# Convert measures to numeric
+# Eliminate NA columns
+
+training.measures <- as.data.frame(lapply(training.fields[, 8:159], as.numeric))
+column.na <- sapply(training.measures, anyNA)
+training <- cbind(training.fields[, 160], training.measures[, !column.na])
+colnames(training)[1] <- colnames(training.fields)[160]
+
+testing.measures <- as.data.frame(lapply(testing.fields[, 8:159], as.numeric))
+testing <- cbind(testing.fields[, 160], testing.measures[, !column.na])
+colnames(testing)[1] <- colnames(testing.fields)[160]
+```
+
+I partitioned the data, randomly selecting 75 percent (almost 15,000 observations) for training and reserving 25 percent for validation.
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+library(caret)
+partition <- createDataPartition(training$classe, p=0.75, list=FALSE)
+train1 <- training[partition, ]
+test1 <- training[-partition, ]
+nrow(train1)
+nrow(test1)
+```
+
+## GBM Model
+
+Feature density plots such as the one shown below, which represents one of the more distinctive predictors, showed that variables had nearly coincident ranges for the five outcome classes. If would be hard to use the range of a variable by itself to assign an observation to a class. The available variables, then, might be thought of "weak predictors," suggesting that more accurate prediction might come from a boosting model. 
+
+```{r cache=TRUE}
+featurePlot(x=train1[, 20], y=train1[, 1], plot="density")
+```
+
+I used the gbm (gradient boosting model) method in the caret package in R to fit the model to the training data. The confusion matrix and related statistics in the training sample showed good accuracy near 97 percent.
+
+```{r message=FALSE, warning=FALSE, cache=TRUE}
+set.seed(5)
+exercisemodel <- train(classe ~ ., data=train1, method="gbm", verbose=FALSE)
+
+print(exercisemodel$finalModel)
+confusionMatrix(predict(exercisemodel, train1), train1$classe)
+```
+
+The model validated on the test sample with accuracy of 96 percent, with a 95 percent confidence interval showing accuracy between 95 and 97 percent.
+
+```{r cache=TRUE}
+confusionMatrix(predict(exercisemodel, test1), test1$classe)
+```
+
+Importantly, the accuracy in predicting class A, the exercise done in correct form, is higher, with sensitivity and specificity both over 98 percent. The model, then, is especially accurate in separating the correct form for the exercise from the various incorrect forms.
